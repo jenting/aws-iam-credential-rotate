@@ -28,7 +28,7 @@ import (
 )
 
 func RotateKeys(client *k8s.Client, namespace string) {
-	err, secrets := getSecretsToRotate(client, namespace)
+	secrets, err := getSecretsToRotate(client, namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -109,16 +109,16 @@ func RotateKeys(client *k8s.Client, namespace string) {
 /**
  * Returns the list of secret that we want to rotate.
  */
-func getSecretsToRotate(client *k8s.Client, namespace string) (error, *corev1.SecretList) {
+func getSecretsToRotate(client *k8s.Client, namespace string) (*corev1.SecretList, error) {
 
 	l := new(k8s.LabelSelector)
 	l.Eq(rotateKeyLabel, "true")
 
 	var secrets corev1.SecretList
 	if err := client.List(context.TODO(), namespace, &secrets, l.Selector()); err != nil {
-		return err, nil
+		return nil, err
 	}
-	return nil, &secrets
+	return &secrets, nil
 }
 
 /**

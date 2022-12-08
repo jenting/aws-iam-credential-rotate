@@ -47,7 +47,7 @@ type DockerConfigEntry struct {
 }
 
 func UpdateECR(client *k8s.Client, namespace string) {
-	err, secrets := getSecretsToUpdate(client, namespace)
+	secrets, err := getSecretsToUpdate(client, namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -95,16 +95,16 @@ func UpdateECR(client *k8s.Client, namespace string) {
 /**
  * Returns the list of secret that we want to rotate.
  */
-func getSecretsToUpdate(client *k8s.Client, namespace string) (error, *corev1.SecretList) {
+func getSecretsToUpdate(client *k8s.Client, namespace string) (*corev1.SecretList, error) {
 
 	l := new(k8s.LabelSelector)
 	l.Eq("aws-ecr-updater", "true")
 
 	var secrets corev1.SecretList
 	if err := client.List(context.TODO(), namespace, &secrets, l.Selector()); err != nil {
-		return err, nil
+		return nil, err
 	}
-	return nil, &secrets
+	return &secrets, nil
 }
 
 /**
@@ -136,7 +136,7 @@ func buildDockerJsonConfig(authorizationData *ecr.AuthorizationData) ([]byte, er
 	user := "AWS"
 	token := aws.StringValue(authorizationData.AuthorizationToken)
 	password := decodePassword(token)
-	password = password[4:len(password)]
+	password = password[4:]
 
 	dockerConfig[endpoint] = DockerConfigEntry{
 		Username: user,
