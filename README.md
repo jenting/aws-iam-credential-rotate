@@ -128,7 +128,7 @@ metadata:
     aws-ecr-updater: "true"
   annotations:
     aws-ecr-updater/secret: "aws-iam-user-credentials"
-    aws-ecr-updater/region: "eu-west-1"
+    aws-ecr-updater/region: "us-west-1"
 type: kubernetes.io/dockerconfigjson
 stringData:
   .dockerconfigjson: "{}"
