@@ -40,10 +40,7 @@ type DockerConfigJson struct {
 type DockerConfig map[string]DockerConfigEntry
 
 type DockerConfigEntry struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Email    string `json:"email"`
-	Auth     string `json:"auth"`
+	Auth string `json:"auth"`
 }
 
 func UpdateECR(client *k8s.Client, namespace string) {
@@ -139,10 +136,7 @@ func buildDockerJsonConfig(authorizationData *ecr.AuthorizationData) ([]byte, er
 	password = password[4:]
 
 	dockerConfig[endpoint] = DockerConfigEntry{
-		Username: user,
-		Password: password,
-		Email:    "openshift@nuxeocloud.com",
-		Auth:     encodeDockerConfigFieldAuth(user, password),
+		Auth: encodeDockerConfigFieldAuth(user, password),
 	}
 
 	config := &DockerConfigJson{
