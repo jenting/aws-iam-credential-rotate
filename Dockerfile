@@ -1,6 +1,5 @@
 # Start by building the application.
-FROM golang:1.12 as build
-ENV GO111MODULE=on
+FROM golang:1.19 as build
 RUN apt-get update -y && apt-get install -y upx
 WORKDIR /go/src/aws-iam-credential-rotate
 COPY . .
