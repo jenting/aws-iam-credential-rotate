@@ -18,13 +18,13 @@ package lib
 import (
 	"context"
 	"encoding/base64"
-	"github.com/ericchiang/k8s"
-	corev1 "github.com/ericchiang/k8s/apis/core/v1"
+	"encoding/json"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ecr"
-
-	"encoding/json"
+	"github.com/docker/cli/cli/config/credentials"
+	"github.com/ericchiang/k8s"
+	corev1 "github.com/ericchiang/k8s/apis/core/v1"
 )
 
 // Dont  want to have full dependencies on k8s so copy/paste just
@@ -130,7 +130,7 @@ func updateSecretFromToken(client *k8s.Client, secret *corev1.Secret, authorizat
 
 func buildDockerJsonConfig(authorizationData *ecr.AuthorizationData) ([]byte, error) {
 
-	endpoint := aws.StringValue(authorizationData.ProxyEndpoint)
+	endpoint := credentials.ConvertToHostname(aws.StringValue(authorizationData.ProxyEndpoint))
 
 	dockerConfig := make(DockerConfig)
 	user := "AWS"
