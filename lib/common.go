@@ -72,13 +72,11 @@ func createSessionFromSecret(secret *corev1.Secret) *session.Session {
 
 }
 
-/**
- * Creates an AWS Session using
- */
+// createSession creates an AWS Session.
 func createSession(accessKeyId string, secretAccessKey string, profileName string) *session.Session {
 	return session.Must(session.NewSessionWithOptions(session.Options{
 		Config: aws.Config{
-			Region:      aws.String("eu-west-1"),
+			Region:      aws.String("us-west-1"),
 			Credentials: credentials.NewStaticCredentials(accessKeyId, secretAccessKey, ""),
 		},
 		Profile: profileName,
