@@ -1,17 +1,19 @@
-AWS IAM key rotate tool
+AWS IAM/ECR Credential Rotation Tool
 =======================
 
-This is a really simple tool that takes a secret containing IAM credentials, rotates them and updates the secret with the new credentials.
+This is a really simple tool that takes a secret containing IAM credentials to
+- Rotate IAM credentials.
+- Rotate ECR credentials.
 
 
 How to use
 ==========
 
 
-Rotate IAM Key
+Rotate IAM Credential
 --------------
 
-### Rotate key policy
+### Rotate IAM credential policy
 
 The following policy has to be created and attached to the user so that he can change his own keys:
 
@@ -36,11 +38,9 @@ The following policy has to be created and attached to the user so that he can c
 
 ### IAM user
 
-
 Create a user in AWS and attach the previous policy to it. Generate an access key for the user.
 
 ### Secret in Kubernetes
-
 
 The following secret will hold the initial credentials of the user.
 
@@ -56,7 +56,7 @@ stringData:
   secret_access_key: xxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-### Cron Job
+### CronJob
 
 Finally we need a CRON job that runs with privileges to list secrets:
 
@@ -91,27 +91,28 @@ roleRef:
 
 ---
 
-apiVersion: batch/v1beta1
+apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: rotate-keys
 spec:
-  schedule: "*/15 * * * *"
   jobTemplate:
     spec:
+      backoffLimit: 10
       template:
-        metadata:
-          labels:
-            parent: "rotate-keys"
         spec:
           containers:
-          - name: rotate
-            image: nuxeo/aws-iam-credential-rotate
-          restartPolicy: Never
+          - name: rotate-keys
+            image: jenting/aws-iam-credential-rotate
+          restartPolicy: OnFailure
+          securityContext:
+            allowPrivilegeEscalation: false
           serviceAccount: aws-credentials-updater
           serviceAccountName: aws-credentials-updater
-  successfulJobsHistoryLimit: 50
-  failedJobsHistoryLimit: 50
+  concurrencyPolicy: Replace
+  schedule: "* */6 * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 10
 ```
 
 Rotate ECR Credentials
@@ -165,31 +166,32 @@ Create the following policy and attach it to the IAM user:
 }
 ```
 
-### Create the CRON Job
+### CronJob
 
 ```yaml
-apiVersion: batch/v1beta1
+apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: rotate-ecr
 spec:
   jobTemplate:
     spec:
+      backoffLimit: 10
       template:
-        metadata:
-          labels:
-            parent: rotate-ecr
         spec:
           containers:
           - command:
             - /aws-iam-credential-rotate
             - ecr-update
-            image: nuxeo/aws-iam-credential-rotate
-            name: rotate
+            image: jenting/aws-iam-credential-rotate
+            name: rotate-ecr
+          securityContext:
+            allowPrivilegeEscalation: false
           serviceAccount: aws-credentials-updater
           serviceAccountName: aws-credentials-updater
-  schedule: 0 */2 * * *
-  successfulJobsHistoryLimit: 10
+  concurrencyPolicy: Replace
+  schedule: "* */6 * * *"
+  successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 10
 ```
 
