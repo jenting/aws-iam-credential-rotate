@@ -102,40 +102,41 @@ func getSecretsToUpdate(client *k8s.Client, namespace string) (*corev1.SecretLis
 
 // updateSecretFromToken updates a k8s secret with the given AWS ECR AuthorizationData.
 func updateSecretFromToken(client *k8s.Client, secret *corev1.Secret, authorizationData *ecr.AuthorizationData) error {
-	json, err := buildDockerJsonConfig(authorizationData)
+	if secret.Data == nil {
+		secret.Data = make(map[string][]byte)
+	}
+	if secret.Metadata.Annotations == nil {
+		secret.Metadata.Annotations = make(map[string]string)
+	}
+
+	dockerConfigJson := DockerConfigJson{}
+	if err := json.Unmarshal(secret.Data[".dockerconfigjson"], &dockerConfigJson); err != nil {
+		log.Errorf("Unable to unmarshal .dockerconfigjson")
+		return err
+	}
+
+	json, err := buildDockerJsonConfig(dockerConfigJson, authorizationData)
 	if err != nil {
 		log.Errorf("Unable to build dockerJsonConfig from AuthorizationData")
 		return err
 	}
 
-	if secret.Metadata.Annotations == nil {
-		secret.Metadata.Annotations = make(map[string]string)
-	}
 	secret.Metadata.Annotations["aws-ecr-updater/expires-at"] = aws.TimeValue(authorizationData.ExpiresAt).String()
-
-	secret.StringData = make(map[string]string)
-	secret.StringData[".dockerconfigjson"] = string(json)
+	secret.Data[".dockerconfigjson"] = json
 	return client.Update(context.TODO(), secret)
 }
 
-func buildDockerJsonConfig(authorizationData *ecr.AuthorizationData) ([]byte, error) {
-	endpoint := credentials.ConvertToHostname(aws.StringValue(authorizationData.ProxyEndpoint))
-
-	dockerConfig := make(DockerConfig)
+func buildDockerJsonConfig(dockerConfigJson DockerConfigJson, authorizationData *ecr.AuthorizationData) ([]byte, error) {
 	user := "AWS"
 	token := aws.StringValue(authorizationData.AuthorizationToken)
 	password := decodePassword(token)
 	password = password[4:]
 
-	dockerConfig[endpoint] = DockerConfigEntry{
+	endpoint := credentials.ConvertToHostname(aws.StringValue(authorizationData.ProxyEndpoint))
+	dockerConfigJson.Auths[endpoint] = DockerConfigEntry{
 		Auth: encodeDockerConfigFieldAuth(user, password),
 	}
-
-	config := &DockerConfigJson{
-		Auths: dockerConfig,
-	}
-
-	return json.Marshal(config)
+	return json.Marshal(dockerConfigJson)
 }
 
 func decodePassword(pass string) string {
