@@ -27,7 +27,7 @@ import (
 	corev1 "github.com/ericchiang/k8s/apis/core/v1"
 )
 
-// Dont  want to have full dependencies on k8s so copy/paste just
+// Dont want to have full dependencies on k8s so copy/paste just
 // to marshall dockerconfigJson
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/credentialprovider/config.go
 type DockerConfigJson struct {
@@ -50,7 +50,6 @@ func UpdateECR(client *k8s.Client, namespace string) {
 	}
 
 	for _, secret := range secrets.Items {
-
 		log.Infof("Found ECR secret: %s", *secret.Metadata.Name)
 
 		accessKeySecretName := secret.Metadata.Annotations["aws-ecr-updater/secret"]
@@ -89,11 +88,8 @@ func UpdateECR(client *k8s.Client, namespace string) {
 
 }
 
-/**
- * Returns the list of secret that we want to rotate.
- */
+// getSecretsToUpdate returns the list of secret that we want to rotate.
 func getSecretsToUpdate(client *k8s.Client, namespace string) (*corev1.SecretList, error) {
-
 	l := new(k8s.LabelSelector)
 	l.Eq("aws-ecr-updater", "true")
 
@@ -104,11 +100,8 @@ func getSecretsToUpdate(client *k8s.Client, namespace string) (*corev1.SecretLis
 	return &secrets, nil
 }
 
-/**
- * Updates a k8s secret with the given AWS ECR AuthorizationData
- */
+// updateSecretFromToken updates a k8s secret with the given AWS ECR AuthorizationData.
 func updateSecretFromToken(client *k8s.Client, secret *corev1.Secret, authorizationData *ecr.AuthorizationData) error {
-
 	json, err := buildDockerJsonConfig(authorizationData)
 	if err != nil {
 		log.Errorf("Unable to build dockerJsonConfig from AuthorizationData")
@@ -126,7 +119,6 @@ func updateSecretFromToken(client *k8s.Client, secret *corev1.Secret, authorizat
 }
 
 func buildDockerJsonConfig(authorizationData *ecr.AuthorizationData) ([]byte, error) {
-
 	endpoint := credentials.ConvertToHostname(aws.StringValue(authorizationData.ProxyEndpoint))
 
 	dockerConfig := make(DockerConfig)

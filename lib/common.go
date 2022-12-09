@@ -36,10 +36,9 @@ const configPropName = "config"
 const credentialsPropName = "credentials"
 const rotateKeyLabel = "aws-rotate-key"
 
-// loadClient parses a kubeconfig from a file and returns a Kubernetes
+// LoadClient parses a kubeconfig from a file and returns a Kubernetes
 // client. It does not support extensions or client auth providers.
 func LoadClient(kubeconfigPath string) (*k8s.Client, error) {
-
 	if kubeconfigPath == "" {
 		log.Info("Using in-cluster configuration")
 		return k8s.NewInClusterClient()
@@ -58,11 +57,8 @@ func LoadClient(kubeconfigPath string) (*k8s.Client, error) {
 	}
 }
 
-/**
- * Creates an AWS Session from a k8s Secret
- */
+// createSessionFromSecret creates an AWS Session from a k8s Secret.
 func createSessionFromSecret(secret *corev1.Secret) *session.Session {
-
 	accessKeyId := string(secret.Data[accessKeyIdPropName])
 	secretAccessKey := string(secret.Data[secretAccessKeyPropName])
 

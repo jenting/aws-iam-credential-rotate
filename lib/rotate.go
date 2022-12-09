@@ -34,7 +34,6 @@ func RotateKeys(client *k8s.Client, namespace string) {
 	}
 
 	for _, secret := range secrets.Items {
-
 		mySession := createSessionFromSecret(secret)
 
 		accessKeyId := string(secret.Data[accessKeyIdPropName])
@@ -59,7 +58,6 @@ func RotateKeys(client *k8s.Client, namespace string) {
 		}
 
 		// Creating the new AccessKey
-
 		result, err := svc.CreateAccessKey(nil)
 		if err != nil {
 			log.Errorf("Unable to create new AccessKey")
@@ -101,16 +99,11 @@ func RotateKeys(client *k8s.Client, namespace string) {
 		} else {
 			log.Infof("Successfully deleted old Access key (%s)", oldAccessKeyId)
 		}
-
 	}
-
 }
 
-/**
- * Returns the list of secret that we want to rotate.
- */
+// getSecretsToRotate returns the list of secret that we want to rotate.
 func getSecretsToRotate(client *k8s.Client, namespace string) (*corev1.SecretList, error) {
-
 	l := new(k8s.LabelSelector)
 	l.Eq(rotateKeyLabel, "true")
 
@@ -121,9 +114,7 @@ func getSecretsToRotate(client *k8s.Client, namespace string) (*corev1.SecretLis
 	return &secrets, nil
 }
 
-/**
- * Rollback the creation of an AccessKey
- */
+// rollbackKeyCreation rolls back the creation of an AccessKey.
 func rollbackKeyCreation(iamSvc *iam.IAM, accessKey *iam.AccessKey) {
 	accessKeyId := aws.StringValue(accessKey.AccessKeyId)
 	err := deleteAccessKey(iamSvc, accessKeyId)
@@ -134,9 +125,7 @@ func rollbackKeyCreation(iamSvc *iam.IAM, accessKey *iam.AccessKey) {
 	}
 }
 
-/*
- * AWSCredentials struct to store id and secret
- */
+// AWSCredentials is a struct to store id and secret.
 type AWSCredentials struct {
 	Profile string
 	ID      string
@@ -144,11 +133,8 @@ type AWSCredentials struct {
 	Region  string
 }
 
-/**
- * Updates a k8s secret with the given AWS AccessKey
- */
+// updateSecret updates a k8s secret with the given AWS AccessKey.
 func updateSecret(client *k8s.Client, secret *corev1.Secret, accessKey *iam.AccessKey) error {
-
 	id := aws.StringValue(accessKey.AccessKeyId)
 	key := aws.StringValue(accessKey.SecretAccessKey)
 
@@ -180,9 +166,7 @@ func updateSecret(client *k8s.Client, secret *corev1.Secret, accessKey *iam.Acce
 	return client.Update(context.TODO(), secret)
 }
 
-/**
- * Deletes an AWS AccessKey based on its Id.
- */
+// deleteAccessKey deletes an AWS AccessKey based on its Id.
 func deleteAccessKey(iamSvc *iam.IAM, accessKeyId string) error {
 	deleteAccessKeyInput := &iam.DeleteAccessKeyInput{
 		AccessKeyId: aws.String(accessKeyId),

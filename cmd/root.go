@@ -17,34 +17,29 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/user"
+
 	"github.com/nuxeo-cloud/aws-iam-credential-rotate/lib"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"os"
-	"os/user"
 )
-
-var cfgFile string
 
 var log = logrus.New()
 
-// rootCmd represents the base command when called without any subcommands
+// rootCmd represents the base command when called without any subcommands.
 var rootCmd = &cobra.Command{
 	Use:   "rotate-iam",
 	Short: "A utility that rotates IAM credientials contained in a k8s secret",
 	Long:  `A utility that rotates IAM credientials contained in a k8s secret.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
 }
 
-// volumeCmd represents the volume command
+// rotateCmd represents the rotate command.
 var rotateCmd = &cobra.Command{
 	Use:   "rotate",
 	Short: "Rotate the keys labelized.",
 	Long:  `Rotates the IAM key`,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		client, err := lib.LoadClient(getKubeConfigPath())
 		if err != nil {
 			log.Fatal(err)
@@ -56,7 +51,6 @@ var rotateCmd = &cobra.Command{
 		}
 
 		lib.RotateKeys(client, namespace)
-
 	},
 }
 
@@ -65,7 +59,6 @@ var ecrUpdate = &cobra.Command{
 	Short: "Update ECR Secret with a new ecr login.",
 	Long:  `Update ECR Secret with a new ecr login`,
 	Run: func(cmd *cobra.Command, args []string) {
-
 		client, err := lib.LoadClient(getKubeConfigPath())
 		if err != nil {
 			log.Fatal(err)
@@ -77,7 +70,6 @@ var ecrUpdate = &cobra.Command{
 		}
 
 		lib.UpdateECR(client, namespace)
-
 	},
 }
 
@@ -85,16 +77,14 @@ func getKubeConfigPath() string {
 	kubeConfigPath := ""
 	usr, err := user.Current()
 	if err == nil {
-		//Try to get kubeConfig from currentUser
+		// Try to get kubeConfig from currentUser
 		kubeConfigPath = usr.HomeDir + "/.kube/config"
 
 		if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
-
 			kubeConfigPath = ""
 		}
 	}
 	return kubeConfigPath
-
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -113,6 +103,4 @@ func init() {
 }
 
 // initConfig reads in config file and ENV variables if set.
-func initConfig() {
-
-}
+func initConfig() {}
