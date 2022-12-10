@@ -19,12 +19,23 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/ecr"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+
+	aws "github.com/aws/aws-sdk-go-v2/aws"
+	ecr "github.com/aws/aws-sdk-go-v2/service/ecr"
+	ecrType "github.com/aws/aws-sdk-go-v2/service/ecr/types"
 	"github.com/docker/cli/cli/config/credentials"
-	"github.com/ericchiang/k8s"
-	corev1 "github.com/ericchiang/k8s/apis/core/v1"
+)
+
+const (
+	awsECRUpdater          = "aws-ecr-updater"
+	awsECRUpdaterSecret    = "aws-ecr-updater/secret"
+	awsECRUpdaterRegion    = "aws-ecr-updater/region"
+	awsECRUpdaterExpiresAt = "aws-ecr-updater/expires-at"
 )
 
 // Dont want to have full dependencies on k8s so copy/paste just
@@ -43,34 +54,36 @@ type DockerConfigEntry struct {
 	Auth string `json:"auth"`
 }
 
-func UpdateECR(client *k8s.Client, namespace string) {
+func UpdateECR(client *kubernetes.Clientset, namespace string) {
 	secrets, err := getSecretsToUpdate(client, namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for _, secret := range secrets.Items {
-		log.Infof("Found ECR secret: %s", *secret.Metadata.Name)
+		log.Infof("Found ECR secret: %s", secret.Name)
 
-		accessKeySecretName := secret.Metadata.Annotations["aws-ecr-updater/secret"]
-		region := secret.Metadata.Annotations["aws-ecr-updater/region"]
+		accessKeySecretName := secret.Annotations[awsECRUpdaterSecret]
+		region := secret.Annotations[awsECRUpdaterRegion]
 
 		log.Infof("For region: %s", region)
 
-		var accessKeySecret corev1.Secret
-		if err := client.Get(context.TODO(), namespace, accessKeySecretName, &accessKeySecret); err != nil {
+		secret, err := client.CoreV1().Secrets(namespace).Get(context.TODO(), accessKeySecretName, metav1.GetOptions{})
+		if err != nil {
 			log.Errorf("Unable to get the secret to build AccessKey")
 			log.Fatal(err)
 		}
 
-		mySession := createSessionFromSecret(&accessKeySecret)
+		awsConfig, err := NewAWSConfig(region, string(secret.Data[accessKeyIdPropName]), string(secret.Data[secretAccessKeyPropName]), "")
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		// Get an authorization Token from ECR
-		svc := ecr.New(mySession, aws.NewConfig().WithRegion(region))
+		svc := ecr.NewFromConfig(awsConfig)
 
 		input := &ecr.GetAuthorizationTokenInput{}
-
-		result, err := svc.GetAuthorizationToken(input)
+		result, err := svc.GetAuthorizationToken(context.TODO(), input)
 		if err != nil {
 			log.Errorf("Unable to get an Authorization token from ECR")
 			log.Fatal(err)
@@ -78,35 +91,27 @@ func UpdateECR(client *k8s.Client, namespace string) {
 
 		log.Infof("Found %d authorizationData", len(result.AuthorizationData))
 
-		err = updateSecretFromToken(client, secret, result.AuthorizationData[0])
+		err = updateSecretFromToken(client, namespace, secret, result.AuthorizationData[0])
 		if err != nil {
 			log.Errorf("Unable to update secret with Token")
 			log.Fatal(err)
 		}
-		log.Infof("Secret %q updated with new ECR credentials", *secret.Metadata.Name)
+		log.Infof("Secret %q updated with new ECR credentials", secret.Name)
 	}
-
 }
 
 // getSecretsToUpdate returns the list of secret that we want to rotate.
-func getSecretsToUpdate(client *k8s.Client, namespace string) (*corev1.SecretList, error) {
-	l := new(k8s.LabelSelector)
-	l.Eq("aws-ecr-updater", "true")
-
-	var secrets corev1.SecretList
-	if err := client.List(context.TODO(), namespace, &secrets, l.Selector()); err != nil {
-		return nil, err
-	}
-	return &secrets, nil
+func getSecretsToUpdate(client *kubernetes.Clientset, namespace string) (*corev1.SecretList, error) {
+	return client.CoreV1().Secrets(namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=true", awsECRUpdater)})
 }
 
 // updateSecretFromToken updates a k8s secret with the given AWS ECR AuthorizationData.
-func updateSecretFromToken(client *k8s.Client, secret *corev1.Secret, authorizationData *ecr.AuthorizationData) error {
+func updateSecretFromToken(client *kubernetes.Clientset, namespace string, secret *corev1.Secret, authorizationData ecrType.AuthorizationData) error {
 	if secret.Data == nil {
 		secret.Data = make(map[string][]byte)
 	}
-	if secret.Metadata.Annotations == nil {
-		secret.Metadata.Annotations = make(map[string]string)
+	if secret.Annotations == nil {
+		secret.Annotations = make(map[string]string)
 	}
 
 	dockerConfigJson := DockerConfigJson{}
@@ -121,18 +126,19 @@ func updateSecretFromToken(client *k8s.Client, secret *corev1.Secret, authorizat
 		return err
 	}
 
-	secret.Metadata.Annotations["aws-ecr-updater/expires-at"] = aws.TimeValue(authorizationData.ExpiresAt).String()
+	secret.Annotations[awsECRUpdaterExpiresAt] = aws.ToTime(authorizationData.ExpiresAt).String()
 	secret.Data[".dockerconfigjson"] = json
-	return client.Update(context.TODO(), secret)
+	_, err = client.CoreV1().Secrets(namespace).Update(context.TODO(), secret, metav1.UpdateOptions{})
+	return err
 }
 
-func buildDockerJsonConfig(dockerConfigJson DockerConfigJson, authorizationData *ecr.AuthorizationData) ([]byte, error) {
+func buildDockerJsonConfig(dockerConfigJson DockerConfigJson, authorizationData ecrType.AuthorizationData) ([]byte, error) {
 	user := "AWS"
-	token := aws.StringValue(authorizationData.AuthorizationToken)
+	token := aws.ToString(authorizationData.AuthorizationToken)
 	password := decodePassword(token)
 	password = password[4:]
 
-	endpoint := credentials.ConvertToHostname(aws.StringValue(authorizationData.ProxyEndpoint))
+	endpoint := credentials.ConvertToHostname(aws.ToString(authorizationData.ProxyEndpoint))
 	dockerConfigJson.Auths[endpoint] = DockerConfigEntry{
 		Auth: encodeDockerConfigFieldAuth(user, password),
 	}

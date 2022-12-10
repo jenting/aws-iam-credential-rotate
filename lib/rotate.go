@@ -18,38 +18,51 @@ package lib
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"text/template"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/iam"
-	"github.com/ericchiang/k8s"
-	corev1 "github.com/ericchiang/k8s/apis/core/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+
+	aws "github.com/aws/aws-sdk-go-v2/aws"
+	iam "github.com/aws/aws-sdk-go-v2/service/iam"
+	iamType "github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
-func RotateKeys(client *k8s.Client, namespace string) {
+const (
+	configPropName      = "config"
+	credentialsPropName = "credentials"
+	rotateKeyLabel      = "aws-rotate-key"
+)
+
+func RotateKeys(client *kubernetes.Clientset, namespace string) {
 	secrets, err := getSecretsToRotate(client, namespace)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for _, secret := range secrets.Items {
-		mySession := createSessionFromSecret(secret)
+		awsConfig, err := NewAWSConfig("", string(secret.Data[accessKeyIdPropName]), string(secret.Data[secretAccessKeyPropName]), "")
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		accessKeyId := string(secret.Data[accessKeyIdPropName])
 		oldAccessKeyId := string(secret.Data[accessKeyIdPropName])
 
-		svc := iam.New(mySession)
+		svc := iam.NewFromConfig(awsConfig)
 
 		// List Keys and delete the one(s) we are not using
-		keys, err := svc.ListAccessKeys(nil)
+		keys, err := svc.ListAccessKeys(context.TODO(), nil)
 		if err != nil {
 			log.Errorf("Unable to use new AccessKey")
 			log.Fatal(err)
 			continue
 		} else {
 			for _, k := range keys.AccessKeyMetadata {
-				key := aws.StringValue(k.AccessKeyId)
+				key := aws.ToString(k.AccessKeyId)
 				if key != accessKeyId {
 					log.Infof("Found orphaned key %s, deleting it", key)
 					deleteAccessKey(svc, key)
@@ -58,7 +71,7 @@ func RotateKeys(client *k8s.Client, namespace string) {
 		}
 
 		// Creating the new AccessKey
-		result, err := svc.CreateAccessKey(nil)
+		result, err := svc.CreateAccessKey(context.TODO(), nil)
 		if err != nil {
 			log.Errorf("Unable to create new AccessKey")
 			log.Errorf(err.Error())
@@ -66,17 +79,21 @@ func RotateKeys(client *k8s.Client, namespace string) {
 		}
 
 		accessKey := result.AccessKey
-		log.Infof("Created new AccessKey: %s", aws.StringValue(accessKey.AccessKeyId))
+		log.Infof("Created new AccessKey: %s", aws.ToString(accessKey.AccessKeyId))
 
 		// Wait for the key to be active
 		time.Sleep(10 * time.Second)
 
 		// Create a new Session
-		newSession := createSession(aws.StringValue(accessKey.AccessKeyId), aws.StringValue(accessKey.SecretAccessKey), "new")
-		newSvc := iam.New(newSession)
+		newAWSConfig, err := NewAWSConfig("", string(secret.Data[accessKeyIdPropName]), string(secret.Data[secretAccessKeyPropName]), "new")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		newSvc := iam.NewFromConfig(newAWSConfig)
 
 		// And make sure we can use it
-		_, err = newSvc.ListAccessKeys(nil)
+		_, err = newSvc.ListAccessKeys(context.TODO(), nil)
 		if err != nil {
 			log.Errorf("Unable to use new AccessKey")
 			rollbackKeyCreation(svc, accessKey)
@@ -84,7 +101,7 @@ func RotateKeys(client *k8s.Client, namespace string) {
 		}
 
 		// Update the secret in k8s
-		err = updateSecret(client, secret, accessKey)
+		err = updateSecret(client, namespace, secret, accessKey)
 		if err != nil {
 			log.Errorf("Unable to update kubernetes secret")
 			rollbackKeyCreation(svc, accessKey)
@@ -103,21 +120,14 @@ func RotateKeys(client *k8s.Client, namespace string) {
 }
 
 // getSecretsToRotate returns the list of secret that we want to rotate.
-func getSecretsToRotate(client *k8s.Client, namespace string) (*corev1.SecretList, error) {
-	l := new(k8s.LabelSelector)
-	l.Eq(rotateKeyLabel, "true")
-
-	var secrets corev1.SecretList
-	if err := client.List(context.TODO(), namespace, &secrets, l.Selector()); err != nil {
-		return nil, err
-	}
-	return &secrets, nil
+func getSecretsToRotate(client *kubernetes.Clientset, namespace string) (*corev1.SecretList, error) {
+	return client.CoreV1().Secrets(namespace).List(context.TODO(), metav1.ListOptions{LabelSelector: fmt.Sprintf("%s=true", rotateKeyLabel)})
 }
 
 // rollbackKeyCreation rolls back the creation of an AccessKey.
-func rollbackKeyCreation(iamSvc *iam.IAM, accessKey *iam.AccessKey) {
-	accessKeyId := aws.StringValue(accessKey.AccessKeyId)
-	err := deleteAccessKey(iamSvc, accessKeyId)
+func rollbackKeyCreation(iamClient *iam.Client, accessKey *iamType.AccessKey) {
+	accessKeyId := aws.ToString(accessKey.AccessKeyId)
+	err := deleteAccessKey(iamClient, accessKeyId)
 	if err != nil {
 		log.Errorf("Unable to delete new AccessKey, there are now probably 2 access keys for this user")
 	} else {
@@ -134,9 +144,9 @@ type AWSCredentials struct {
 }
 
 // updateSecret updates a k8s secret with the given AWS AccessKey.
-func updateSecret(client *k8s.Client, secret *corev1.Secret, accessKey *iam.AccessKey) error {
-	id := aws.StringValue(accessKey.AccessKeyId)
-	key := aws.StringValue(accessKey.SecretAccessKey)
+func updateSecret(client *kubernetes.Clientset, namespace string, secret corev1.Secret, accessKey *iamType.AccessKey) error {
+	id := aws.ToString(accessKey.AccessKeyId)
+	key := aws.ToString(accessKey.SecretAccessKey)
 
 	// Defining template for credentials file
 	defaultCredentials := AWSCredentials{"default", id, key, "eu-west-1"}
@@ -158,20 +168,21 @@ func updateSecret(client *k8s.Client, secret *corev1.Secret, accessKey *iam.Acce
 	credentialsFileTemplate.Execute(&openshiftCredentialsData, openshiftCredentials)
 
 	secret.StringData = make(map[string]string)
-	secret.StringData[accessKeyIdPropName] = aws.StringValue(accessKey.AccessKeyId)
-	secret.StringData[secretAccessKeyPropName] = aws.StringValue(accessKey.SecretAccessKey)
+	secret.StringData[accessKeyIdPropName] = aws.ToString(accessKey.AccessKeyId)
+	secret.StringData[secretAccessKeyPropName] = aws.ToString(accessKey.SecretAccessKey)
 	secret.StringData[configPropName] = defaultCredentialsData.String()
 	secret.StringData[credentialsPropName] = openshiftCredentialsData.String()
 
-	return client.Update(context.TODO(), secret)
+	_, err = client.CoreV1().Secrets(namespace).Update(context.TODO(), &secret, metav1.UpdateOptions{})
+	return err
 }
 
 // deleteAccessKey deletes an AWS AccessKey based on its Id.
-func deleteAccessKey(iamSvc *iam.IAM, accessKeyId string) error {
+func deleteAccessKey(iamClient *iam.Client, accessKeyId string) error {
 	deleteAccessKeyInput := &iam.DeleteAccessKeyInput{
 		AccessKeyId: aws.String(accessKeyId),
 	}
 
-	_, err := iamSvc.DeleteAccessKey(deleteAccessKeyInput)
+	_, err := iamClient.DeleteAccessKey(context.TODO(), deleteAccessKeyInput)
 	return err
 }

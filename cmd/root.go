@@ -18,7 +18,9 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"os/user"
+
+	"k8s.io/client-go/kubernetes"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/nuxeo-cloud/aws-iam-credential-rotate/lib"
 	"github.com/sirupsen/logrus"
@@ -40,16 +42,17 @@ var rotateCmd = &cobra.Command{
 	Short: "Rotate the keys labelized.",
 	Long:  `Rotates the IAM key`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client, err := lib.LoadClient(getKubeConfigPath())
+		kubeConfig, err := ctrl.GetConfig()
 		if err != nil {
-			log.Fatal(err)
+			log.WithError(err).Fatal("unable to getting Kubernetes client config")
 		}
 
-		namespace, exists := os.LookupEnv("NAMESPACE")
-		if !exists {
-			namespace = client.Namespace
+		client, err := kubernetes.NewForConfig(kubeConfig)
+		if err != nil {
+			log.WithError(err).Fatal("constructing Kubernetes client")
 		}
 
+		namespace, _ := os.LookupEnv("NAMESPACE")
 		lib.RotateKeys(client, namespace)
 	},
 }
@@ -59,32 +62,19 @@ var ecrUpdate = &cobra.Command{
 	Short: "Update ECR Secret with a new ecr login.",
 	Long:  `Update ECR Secret with a new ecr login`,
 	Run: func(cmd *cobra.Command, args []string) {
-		client, err := lib.LoadClient(getKubeConfigPath())
+		kubeConfig, err := ctrl.GetConfig()
 		if err != nil {
-			log.Fatal(err)
+			log.WithError(err).Fatal("unable to getting Kubernetes client config")
 		}
 
-		namespace, exists := os.LookupEnv("NAMESPACE")
-		if !exists {
-			namespace = client.Namespace
+		client, err := kubernetes.NewForConfig(kubeConfig)
+		if err != nil {
+			log.WithError(err).Fatal("constructing Kubernetes client")
 		}
 
+		namespace, _ := os.LookupEnv("NAMESPACE")
 		lib.UpdateECR(client, namespace)
 	},
-}
-
-func getKubeConfigPath() string {
-	kubeConfigPath := ""
-	usr, err := user.Current()
-	if err == nil {
-		// Try to get kubeConfig from currentUser
-		kubeConfigPath = usr.HomeDir + "/.kube/config"
-
-		if _, err := os.Stat(kubeConfigPath); os.IsNotExist(err) {
-			kubeConfigPath = ""
-		}
-	}
-	return kubeConfigPath
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
